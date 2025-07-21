@@ -2,18 +2,18 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8" />
-<title>分割対応 全色1x1PNG一括生成＆ZIPダウンロード</title>
+<title>KubeJS RGBブロック分割生成ツール</title>
 <style>
-  body { font-family: Arial, sans-serif; max-width: 600px; margin: 2rem auto; }
-  button { padding: 0.5rem 1rem; font-size: 1.1rem; }
+  body { font-family: Arial, sans-serif; max-width: 700px; margin: 2rem auto; }
   label { display: block; margin-top: 1rem; }
-  input[type="text"] { width: 120px; font-family: monospace; }
-  #log { margin-top: 1rem; white-space: pre-wrap; height: 150px; overflow-y: auto; border: 1px solid #ccc; padding: 0.5rem; background: #f9f9f9; }
+  input[type="text"] { width: 120px; font-family: monospace; font-size: 1rem; }
+  select { font-size: 1rem; }
+  button { margin-top: 1rem; padding: 0.5rem 1rem; font-size: 1rem; cursor: pointer; }
+  textarea { width: 100%; height: 400px; margin-top: 1rem; font-family: monospace; white-space: pre; }
 </style>
 </head>
 <body>
-  <h1>分割対応 全色1x1 PNG 一括生成＆ZIPダウンロード</h1>
-  <p>指定範囲の色だけを生成可能。処理負荷を分散できます。</p>
+  <h1>KubeJS RGBブロック分割生成ツール</h1>
 
   <label>
     開始カラーコード（16進6桁）
@@ -25,14 +25,23 @@
     <input type="text" id="endColor" value="0000ff" maxlength="6" />
   </label>
 
-  <button id="startBtn">生成開始</button>
-  <div id="log"></div>
+  <label>
+    ブロックタイプを選択
+    <select id="blockType">
+      <option value="block">ブロック</option>
+      <option value="slab">ハーフブロック</option>
+      <option value="stairs">階段</option>
+    </select>
+  </label>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <button id="generateBtn">コード生成</button>
+
+  <label>
+    生成されたKubeJSコード
+    <textarea id="outputCode" readonly></textarea>
+  </label>
+
   <script>
-    const startBtn = document.getElementById('startBtn');
-    const logDiv = document.getElementById('log');
-
     function toHex6(num) {
       return num.toString(16).padStart(6, '0');
     }
@@ -41,35 +50,10 @@
       return /^[0-9a-fA-F]{6}$/.test(str);
     }
 
-    // 1x1キャンバスで色をPNGデータURLに変換
-    function create1x1PNG(color) {
-      const canvas = document.createElement('canvas');
-      canvas.width = 1;
-      canvas.height = 1;
-      const ctx = canvas.getContext('2d');
-      const r = (color >> 16) & 0xff;
-      const g = (color >> 8) & 0xff;
-      const b = color & 0xff;
-      ctx.fillStyle = `rgb(${r},${g},${b})`;
-      ctx.fillRect(0, 0, 1, 1);
-      return canvas.toDataURL('image/png');
-    }
-
-    // base64データURLからバイナリデータを取得
-    function dataURLtoUint8Array(dataurl) {
-      const base64 = dataurl.split(',')[1];
-      const binary_string = atob(base64);
-      const len = binary_string.length;
-      const bytes = new Uint8Array(len);
-      for(let i = 0; i < len; i++) {
-        bytes[i] = binary_string.charCodeAt(i);
-      }
-      return bytes;
-    }
-
-    startBtn.addEventListener('click', async () => {
+    document.getElementById('generateBtn').addEventListener('click', () => {
       const startStr = document.getElementById('startColor').value.trim();
       const endStr = document.getElementById('endColor').value.trim();
+      const type = document.getElementById('blockType').value;
 
       if(!isValidHex6(startStr) || !isValidHex6(endStr)) {
         alert('開始・終了カラーコードは6桁の16進数で入力してください。例: 00ff00');
@@ -84,45 +68,40 @@
         return;
       }
 
-      // 色数制限チェック（例10万色以上は警告）
+      // 処理範囲が大きすぎる場合の警告（例:10万色以上）
       if(end - start > 100000) {
         if(!confirm(`指定された色範囲は${end - start + 1}色です。処理に時間がかかる可能性があります。続行しますか？`)) {
           return;
         }
       }
 
-      startBtn.disabled = true;
-      logDiv.textContent = '処理開始...\n';
+      let code = '';
 
-      const zip = new JSZip();
-      const chunkSize = 10000;
-      let processed = 0;
+      for(let i = start; i <= end; i++) {
+        const c = toHex6(i);
+        let id = c.toLowerCase();
+        let displayName = '';
 
-      for(let rangeStart = start; rangeStart <= end; rangeStart += chunkSize) {
-        const rangeEnd = Math.min(rangeStart + chunkSize - 1, end);
-
-        for(let color = rangeStart; color <= rangeEnd; color++) {
-          const hex = toHex6(color);
-          const dataURL = create1x1PNG(color);
-          const bytes = dataURLtoUint8Array(dataURL);
-          zip.file(`${hex}.png`, bytes);
+        if(type === 'slab') {
+          id += '_slab';
+          displayName = `Color Slab #${c.toUpperCase()}`;
+        } else if(type === 'stairs') {
+          id += '_stairs';
+          displayName = `Color Stairs #${c.toUpperCase()}`;
+        } else {
+          displayName = `Color Block #${c.toUpperCase()}`;
         }
 
-        processed += (rangeEnd - rangeStart + 1);
-        logDiv.textContent = `処理中: ${processed} / ${end - start + 1} 色生成中...\n`;
-        await new Promise(r => setTimeout(r, 50)); // 応答維持
+        const hardness = (type === 'slab') ? '1.0' : '1.5';
+
+        code += `event.create('${id}')\n`;
+        code += `  .material('wood')\n`;
+        code += `  .hardness(${hardness})\n`;
+        code += `  .displayName('${displayName}')\n`;
+        code += `  .texture('${c.toLowerCase()}');\n\n`;
       }
 
-      logDiv.textContent = '圧縮処理中...お待ちください。\n';
-      const content = await zip.generateAsync({type:"blob"});
-
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(content);
-      a.download = `rgb_${startStr}_to_${endStr}.zip`;
-      a.click();
-
-      logDiv.textContent = '完了！ZIPファイルのダウンロードが開始されました。\n';
-      startBtn.disabled = false;
+      document.getElementById('outputCode').value = code;
     });
   </script>
 </body>
